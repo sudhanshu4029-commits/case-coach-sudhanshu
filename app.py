@@ -380,7 +380,6 @@ if S.phase == "setup":
         persona = st.radio("Professor style", list(PERSONAS),
                            captions=["Demanding, challenges every claim", "Patient and encouraging"])
         cold_call = st.toggle("Cold-call mode", help=f"{COLD_CALL_SECONDS} seconds per answer, like a real case classroom.")
-        consent = st.checkbox(f"Send my case and answers to {provider_name()}")
 
     case_text = (case_text or "").strip()
     problems = []
@@ -390,8 +389,6 @@ if S.phase == "setup":
         problems.append(f"The case needs at least {MIN_CASE_CHARS} characters so the professor has something to work with.")
     if len(case_text) > MAX_CASE_CHARS:
         problems.append(f"The case is {len(case_text):,} characters. Trim it to under {MAX_CASE_CHARS:,}.")
-    if not consent:
-        problems.append("Tick the privacy checkbox to continue.")
 
     st.write("")
     if st.button("Start the class", type="primary", disabled=bool(problems)):
