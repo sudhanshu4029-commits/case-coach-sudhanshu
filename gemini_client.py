@@ -58,16 +58,23 @@ class GeminiClient:
     def __init__(self, api_key, preferred_model=None):
         self.provider = detect_provider(api_key)
         self.provider_name = PROVIDER_NAMES[self.provider]
-        if self.provider == "groq":
-            from groq import Groq
+        try:
+            if self.provider == "groq":
+                from groq import Groq
 
-            self.client = Groq(api_key=api_key, max_retries=0)
-            defaults = GROQ_MODELS
-        else:
-            from google import genai
+                self.client = Groq(api_key=api_key, max_retries=0)
+                defaults = GROQ_MODELS
+            else:
+                from google import genai
 
-            self.client = genai.Client(api_key=api_key)
-            defaults = GEMINI_MODELS
+                self.client = genai.Client(api_key=api_key)
+                defaults = GEMINI_MODELS
+        except ImportError as e:
+            raise GeminiError(
+                "A required package is missing. Make sure requirements.txt in GitHub lists groq and "
+                "google-genai, then reboot the app.",
+                repr(e),
+            )
         # Only honour a preferred model that belongs to this provider.
         is_gemini_name = bool(preferred_model) and preferred_model.startswith("gemini")
         models = [preferred_model] if preferred_model and is_gemini_name == (self.provider == "gemini") else []

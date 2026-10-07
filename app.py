@@ -113,7 +113,8 @@ def _secret(name):
 
 def get_api_key():
     # Groq is checked first because it is much faster; Gemini is the fallback.
-    return _secret("GROQ_API_KEY") or _secret("GEMINI_API_KEY") or S.get("user_api_key")
+    key = _secret("GROQ_API_KEY") or _secret("GEMINI_API_KEY")
+    return str(key).strip().strip('"').strip("'").strip() if key else None
 
 
 def provider_name():
@@ -130,9 +131,20 @@ def get_client():
     if not key:
         return None
     if S.get("_client_key") != key:
-        S["_client"] = GeminiClient(key, get_model_pref())
+        S["_client"] = GeminiClient(key, get_model_pref())  # may raise GeminiError (e.g. package missing)
         S["_client_key"] = key
     return S["_client"]
+
+
+def connection_check():
+    try:
+        r = get_client().generate_json('Reply in JSON: {"ok": true}', 'Return JSON {"ok": true}', temperature=0)
+        c = S["_client"]
+        S.notice = ("success", f"Connected to {c.provider_name} ({c.active_model}). Reply: {r}")
+    except GeminiError as e:
+        S.notice = ("error", e.user_message, e.detail)
+    except Exception as e:
+        S.notice = ("error", f"Connection check failed: {type(e).__name__}", repr(e))
 
 
 # ---------------------------------------------------------------- helpers
@@ -157,6 +169,8 @@ def merge_board(updates):
 def ask_professor(student_message, mode="answer", seconds_taken=None):
     """One model call. Returns the parsed dict, or a safe fallback."""
     client = get_client()
+    if client is None:
+        raise GeminiError("No API key found. Add GROQ_API_KEY in Streamlit Secrets.")
     system = professor_system_prompt(S.persona, S.framework)
     prompt = turn_prompt(S.case_text, S.messages, S.board, student_message, mode, seconds_taken)
     try:
@@ -177,7 +191,7 @@ def professor_turn(student_message, mode="answer", seconds_taken=None):
         try:
             data = ask_professor(student_message, mode, seconds_taken)
         except GeminiError as e:
-            S.notice = ("error", e.user_message)
+            S.notice = ("error", e.user_message, e.detail)
             if mode == "answer" and S.messages and S.messages[-1]["role"] == "student":
                 S.messages.pop()  # let the student resend instead of leaving an unanswered turn
             S.turn -= 1
@@ -299,9 +313,10 @@ with st.sidebar:
         f"{PROFESSOR_NAME} is an AI coach built on {provider_name()}. It asks questions; it never gives you the answer. "
         "It can misread a case or misjudge an answer, so treat its feedback as a sparring partner, not a grade."
     )
-    if not get_api_key():
-        st.text_input("Groq or Gemini API key", type="password", key="user_api_key",
-                      help="Free key from console.groq.com or aistudio.google.com. Used only for this browser session.")
+    if get_api_key() and st.button("🔌 Check AI connection"):
+        with st.spinner("Pinging the model..."):
+            connection_check()
+        st.rerun()
     if S.phase != "setup":
         st.download_button("Download transcript", transcript_markdown(), file_name="case_discussion.md")
         if st.button("Start over"):
@@ -316,8 +331,11 @@ with st.sidebar:
 
 # ---------------------------------------------------------------- notices
 if S.notice:
-    kind, text = S.notice
-    (st.error if kind == "error" else st.warning)(text)
+    kind, text, *detail = S.notice
+    {"error": st.error, "success": st.success}.get(kind, st.warning)(text)
+    if detail and detail[0]:
+        with st.expander("Technical details (share these if you need help)"):
+            st.code(str(detail[0])[-3000:])
     S.notice = None
 
 # ================================================================= SETUP
@@ -367,7 +385,7 @@ if S.phase == "setup":
     case_text = (case_text or "").strip()
     problems = []
     if not get_api_key():
-        problems.append("Add a Groq or Gemini API key in the sidebar.")
+        problems.append("The AI isn't configured yet. The app owner needs to add GROQ_API_KEY in Streamlit Secrets.")
     if len(case_text) < MIN_CASE_CHARS:
         problems.append(f"The case needs at least {MIN_CASE_CHARS} characters so the professor has something to work with.")
     if len(case_text) > MAX_CASE_CHARS:
@@ -498,7 +516,7 @@ elif S.phase == "assess":
             except BadOutput:
                 S.notice = ("error", "The report came back incomplete. Press the button again to regenerate it.")
             except GeminiError as e:
-                S.notice = ("error", e.user_message)
+                S.notice = ("error", e.user_message, e.detail)
         st.rerun()
 
 # ================================================================= REPORT
